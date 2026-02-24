@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CBT MVP</title>
+    <style>
+      body { font-family: sans-serif; margin: 24px; max-width: 900px; }
+      .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+      button { padding: 8px 12px; cursor: pointer; }
+      input, select { padding: 6px; margin-right: 8px; }
+      .row { margin-bottom: 12px; }
+      .muted { color: #666; }
+    </style>
+  </head>
+  <body>
+    <h1>PDF CBT MVP</h1>
+    <p class="muted">데모용 웹 UI입니다. (데스크톱 모드도 지원)</p>
+
+    <div class="card">
+      <h3>1) 과목 생성</h3>
+      <div class="row">
+        <input id="subjectName" placeholder="예: 수학" />
+        <button onclick="createSubject()">과목 생성</button>
+      </div>
+      <pre id="subjectResult"></pre>
+    </div>
+
+    <div class="card">
+      <h3>2) PDF 등록 + 목업 추출</h3>
+      <div class="row">
+        <input id="pdfName" placeholder="예: math.pdf" />
+        <input id="subjectIdForExtract" type="number" placeholder="subject_id" />
+        <button onclick="uploadAndExtract()">등록 + 추출</button>
+      </div>
+      <pre id="extractResult"></pre>
+    </div>
+
+    <div class="card">
+      <h3>3) 시험 시작/제출</h3>
+      <div class="row">
+        <input id="userId" placeholder="user_id" value="demo-user" />
+        <input id="subjectId" type="number" placeholder="subject_id" />
+        <input id="questionCount" type="number" placeholder="문항수" value="1" />
+        <button onclick="startExam()">시험 시작</button>
+      </div>
+      <div id="examArea"></div>
+      <pre id="submitResult"></pre>
+    </div>
+
+    <script>
+      let currentAttemptId = null;
+
+      async function createSubject() {
+        const name = document.getElementById('subjectName').value;
+        const res = await fetch(`/subjects/${encodeURIComponent(name)}`, { method: 'POST' });
+        const data = await res.json();
+        document.getElementById('subjectResult').textContent = JSON.stringify(data, null, 2);
+      }
+
+      async function uploadAndExtract() {
+        const filename = document.getElementById('pdfName').value;
+        const subjectId = Number(document.getElementById('subjectIdForExtract').value);
+
+        const uploadRes = await fetch('/upload/pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename })
+        });
+        const uploadData = await uploadRes.json();
+
+        const extRes = await fetch('/admin/extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pdf_source_id: uploadData.pdf_source_id, subject_id: subjectId })
+        });
+        const extData = await extRes.json();
+        document.getElementById('extractResult').textContent = JSON.stringify({ uploadData, extData }, null, 2);
+      }
+
+      async function startExam() {
+        const userId = document.getElementById('userId').value;
+        const subjectId = Number(document.getElementById('subjectId').value);
+        const questionCount = Number(document.getElementById('questionCount').value);
+
+        const res = await fetch('/exam/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId, subject_id: subjectId, question_count: questionCount, mode: 'random' })
+        });
+        const data = await res.json();
+        currentAttemptId = data.attempt_id;
+
+        const examArea = document.getElementById('examArea');
+        examArea.innerHTML = '';
+
+        for (const q of data.questions) {
+          const div = document.createElement('div');
+          div.className = 'card';
+          div.innerHTML = `
+            <div><strong>Q${q.question_id}.</strong> ${q.stem}</div>
+            ${q.choices.map(c => `<label><input type="radio" name="item_${q.attempt_item_id}" value="${c.label}"> ${c.label}. ${c.text}</label><br/>`).join('')}
+          `;
+          examArea.appendChild(div);
+        }
+
+        const submitBtn = document.createElement('button');
+        submitBtn.textContent = '제출';
+        submitBtn.onclick = submitExam;
+        examArea.appendChild(submitBtn);
+      }
+
+      async function submitExam() {
+        const radios = document.querySelectorAll('input[type="radio"]:checked');
+        const items = Array.from(radios).map(r => ({
+          attempt_item_id: Number(r.name.replace('item_', '')),
+          selected_answer: r.value
+        }));
+
+        const res = await fetch(`/exam/${currentAttemptId}/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items })
+        });
+        const data = await res.json();
+        document.getElementById('submitResult').textContent = JSON.stringify(data, null, 2);
+      }
+    </script>
+  </body>
+</html>
