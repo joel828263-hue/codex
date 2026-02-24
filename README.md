@@ -43,6 +43,7 @@ python3 app.py --stock 삼성전자
 ## 자주 생기는 에러
 
 - `pip` 명령이 없다고 나오면: `python -m pip install -r requirements.txt`
+- `invalid syntax` 오류: Python 버전이 낮을 가능성이 큼. `python --version`으로 확인 후 **Python 3.9+** 설치
 - SSL/네트워크 오류: 잠시 후 재시도
 - 특정 날짜에 리포트가 없으면: 종목명을 다르게 시도 (예: `삼성전자`, `SK하이닉스`)
 

@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""경제 뉴스 + 종목 리포트 수집/번역 도구.
-
-사용법(초보자용):
-1) 터미널에서 `python app.py --stock 삼성전자` 처럼 실행
-2) 결과는 output/ 폴더의 markdown 파일로 저장
-"""
+"""경제 뉴스 + 종목 리포트 수집/번역 도구."""
 
 from __future__ import annotations
 
@@ -13,12 +8,7 @@ import datetime as dt
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
-
-import requests
-from bs4 import BeautifulSoup
-from deep_translator import GoogleTranslator
-from feedparser import parse as parse_feed
+from typing import Iterable, List
 
 
 USER_AGENT = (
@@ -39,35 +29,42 @@ class Item:
 
 
 def clean_text(text: str) -> str:
-    text = re.sub(r"\s+", " ", text or "").strip()
-    return text
+    return re.sub(r"\s+", " ", text or "").strip()
 
 
 def translate_to_korean(text: str) -> str:
+    from deep_translator import GoogleTranslator
+
     text = clean_text(text)
     if not text:
         return ""
-    # 이미 한글 비중이 높으면 번역 생략
+
     hangul_count = len(re.findall(r"[가-힣]", text))
     if hangul_count > max(8, len(text) // 3):
         return text
+
     try:
         return GoogleTranslator(source="auto", target="ko").translate(text)
     except Exception:
         return text
 
 
-def fetch_economic_news(limit: int = 10) -> list[Item]:
+def fetch_economic_news(limit: int = 10) -> List[Item]:
+    from bs4 import BeautifulSoup
+    from feedparser import parse as parse_feed
+
     rss_url = "https://news.google.com/rss/search?q=%EA%B2%BD%EC%A0%9C&hl=ko&gl=KR&ceid=KR:ko"
     feed = parse_feed(rss_url)
-    items: list[Item] = []
+    items = []  # type: List[Item]
 
     for entry in feed.entries[:limit]:
         title = clean_text(entry.get("title", ""))
         source = clean_text(entry.get("source", {}).get("title", "Google News"))
         date = clean_text(entry.get("published", ""))
         url = clean_text(entry.get("link", ""))
-        summary = clean_text(BeautifulSoup(entry.get("summary", ""), "html.parser").get_text(" "))
+        summary_html = entry.get("summary", "")
+        summary = clean_text(BeautifulSoup(summary_html, "html.parser").get_text(" "))
+
         items.append(
             Item(
                 title=translate_to_korean(title),
@@ -77,10 +74,14 @@ def fetch_economic_news(limit: int = 10) -> list[Item]:
                 summary=translate_to_korean(summary),
             )
         )
+
     return items
 
 
-def fetch_stock_reports(stock_keyword: str, limit: int = 10) -> list[Item]:
+def fetch_stock_reports(stock_keyword: str, limit: int = 10) -> List[Item]:
+    import requests
+    from bs4 import BeautifulSoup
+
     base_url = "https://finance.naver.com/research/company_list.naver"
     resp = requests.get(base_url, headers=HEADERS, timeout=15)
     resp.raise_for_status()
@@ -90,10 +91,9 @@ def fetch_stock_reports(stock_keyword: str, limit: int = 10) -> list[Item]:
     if not table:
         return []
 
-    rows = table.select("tr")
-    reports: list[Item] = []
+    reports = []  # type: List[Item]
 
-    for row in rows:
+    for row in table.select("tr"):
         cols = row.select("td")
         if len(cols) < 5:
             continue
@@ -108,16 +108,16 @@ def fetch_stock_reports(stock_keyword: str, limit: int = 10) -> list[Item]:
 
         title = clean_text(title_link.get_text(" "))
         href = title_link.get("href", "")
-        report_url = f"https://finance.naver.com{href}"
+        report_url = "https://finance.naver.com{0}".format(href)
         analyst = clean_text(cols[2].get_text(" "))
         source = clean_text(cols[3].get_text(" "))
         date = clean_text(cols[4].get_text(" "))
-
         summary = fetch_report_summary(report_url)
+
         reports.append(
             Item(
                 title=translate_to_korean(title),
-                source=f"{source} / 애널리스트: {analyst}",
+                source="{0} / 애널리스트: {1}".format(source, analyst),
                 date=date,
                 url=report_url,
                 summary=translate_to_korean(summary),
@@ -131,6 +131,9 @@ def fetch_stock_reports(stock_keyword: str, limit: int = 10) -> list[Item]:
 
 
 def fetch_report_summary(url: str) -> str:
+    import requests
+    from bs4 import BeautifulSoup
+
     try:
         resp = requests.get(url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
@@ -142,26 +145,27 @@ def fetch_report_summary(url: str) -> str:
     if not body:
         return "리포트 요약을 찾지 못했습니다."
 
-    text = clean_text(body.get_text(" "))
-    return text[:1200]
+    return clean_text(body.get_text(" "))[:1200]
 
 
 def to_markdown(title: str, items: Iterable[Item]) -> str:
-    lines = [f"# {title}", ""]
+    lines = ["# {0}".format(title), ""]
     for idx, item in enumerate(items, start=1):
         lines.extend(
             [
-                f"## {idx}. {item.title}",
-                f"- 출처: {item.source}",
-                f"- 날짜: {item.date}",
-                f"- 링크: {item.url}",
+                "## {0}. {1}".format(idx, item.title),
+                "- 출처: {0}".format(item.source),
+                "- 날짜: {0}".format(item.date),
+                "- 링크: {0}".format(item.url),
                 "",
                 item.summary or "(요약 없음)",
                 "",
             ]
         )
+
     if len(lines) <= 2:
         lines.append("수집된 데이터가 없습니다.")
+
     return "\n".join(lines)
 
 
@@ -180,15 +184,15 @@ def main() -> None:
     out_dir.mkdir(exist_ok=True)
 
     news_md = to_markdown("경제 뉴스(한글 번역)", news)
-    report_md = to_markdown(f"{args.stock} 증권사 리포트(한글 번역)", reports)
+    report_md = to_markdown("{0} 증권사 리포트(한글 번역)".format(args.stock), reports)
 
-    news_file = out_dir / f"news_{now}.md"
-    report_file = out_dir / f"report_{args.stock}_{now}.md"
+    news_file = out_dir / "news_{0}.md".format(now)
+    report_file = out_dir / "report_{0}_{1}.md".format(args.stock, now)
     news_file.write_text(news_md, encoding="utf-8")
     report_file.write_text(report_md, encoding="utf-8")
 
-    print(f"완료: {news_file}")
-    print(f"완료: {report_file}")
+    print("완료: {0}".format(news_file))
+    print("완료: {0}".format(report_file))
 
 
 if __name__ == "__main__":
